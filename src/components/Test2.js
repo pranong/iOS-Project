@@ -14,12 +14,15 @@ import {
   Image,
   Picker,
   Dimensions,
+  Alert,
 } from 'react-native';
+var TimerMixin = require('react-timer-mixin');
 import ModalSelector from 'react-native-modal-selector';
 import InCallManager from 'react-native-incall-manager';
 import io from 'socket.io-client';
-
-
+import firebase from '../../firebase'
+var userRef = firebase.database().ref("User/");
+var logRef = firebase.database().ref("log/");
 // const socket = io.connect('http://192.168.1.18:4443/', {transports: ['websocket']});
 const socket = io.connect('https://react-native-webrtc.herokuapp.com', {transports: ['websocket']});
 
@@ -223,7 +226,7 @@ socket.on('connect', function(data) {
   getLocalStream(true, function(stream) {
     localStream = stream;
     container.setState({selfViewSrc: stream.toURL()});
-    container.setState({status: 'ready', info: 'Please Login'});
+    container.setState({status: 'ready', info: 'Welcome'});
   });
 });
 
@@ -277,8 +280,9 @@ function onLogin(data){
      //loginContainer.parentElement.removeChild(loginContainer);
      var username = data.username;
      var socketid = data.socketid;
+     container.setState({mysocketid: socketid});
      console.log("Login Successfull");
-     console.log("logged in as :" + username + ", " + socketid);
+     console.log("logged in as :" + username + ", " + socketid + ", " + container.state.mysocketid);
      console.log(data.userlist);
     //  console.log(data.userlist);
     //  let toArray = _.keys(data.userlist);
@@ -331,8 +335,15 @@ export default class Test2 extends React.Component {
       textRoomConnected: false,
       textRoomData: [],
       textRoomValue: '',
-      username: '',
-      call: 'PranongPunkrawk'
+      username: 'nutpat2539',
+      myname: '',
+      call: 'PranongPunkrawk',
+      loginStatus: 'Failed',
+      myuid: '',
+      mysocketid: '',
+      lastLat: '0',
+      lastLng: '0',
+      loguid: ''
     };
   }
   
@@ -341,28 +352,105 @@ export default class Test2 extends React.Component {
     if(username == ""){
       this.setState({ info: "Please enter Username" })
     }else{
-        socket.send({
+    let username = this.state.username
+    userRef
+      .orderByChild("user")
+      .equalTo(username)
+      .once("value")
+      .then(snapshot => {
+          if (snapshot.val()) {
+            console.log(snapshot.val())
+            console.log(Object.entries(snapshot.val())[0][0])
+            console.log(Object.entries(snapshot.val())[0][1].name)
+            this.setState({info: 'Login Successful ' + Object.entries(snapshot.val())[0][0], loginStatus: 'Success',myname: Object.entries(snapshot.val())[0][1].name, myuid: Object.entries(snapshot.val())[0][0]});
+            socket.send({
               type: "login",
               name: username
                  })
+          }else{
+            this.setState({info: 'Login Unsuccessful'});
+          }
+      })
     }
   }
   componentDidMount() {
     container = this;
+    TimerMixin.setInterval( () => { 
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          this.setState({
+            lastLat: position.coords.latitude,
+            lastLng: position.coords.longitude,
+            error: null,
+          });
+        },
+        (error) => this.setState({ error: error.message }),
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000 },
+      );
+   }, 3000);
+    this.watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        this.setState({
+          lastLat: position.coords.latitude,
+          lastLong: position.coords.longitude,
+          error: null,
+        });
+      },
+      (error) => this.setState({ error: error.message }),
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000, distanceFilter: 10 },
+    );
   }
+
+  componentWillUnmount() {
+    navigator.geolocation.clearWatch(this.watchId);
+  }
+
+  sendLog() {
+    // if(this.state.lastLat == 0 || this.state.lastLong == 0){
+    //   Alert.alert('Generating the location. Please Try again later.');
+    // }else{
+      var date = new Date().getDate();
+      var month = new Date().getMonth() + 1;
+      var year = new Date().getFullYear();
+
+      var hour = new Date().getHours(); 
+      var min = new Date().getMinutes();
+      var sec = new Date().getSeconds();
+
+      var fullDate = date + '/' + month + '/' + year;
+      var fullTime = hour + ':' + min + ':' + sec;
+
+      // var name = snapshot.name();
+      
+      var ref = logRef.push({date: fullDate, time: fullTime, lat: this.state.lastLat, lng: this.state.lastLng, caller: this.state.myname, callto: this.state.call});
+      var n = ref.toString().lastIndexOf("log");
+      var num = (n + 4);
+      var uid = ref.toString().substring(num);
+      // var uid = '123698745'
+      this.setState({loguid: uid});
+      console.log('Inref : ' + uid);
+      // Alert.alert(uid + ' ' + fullDate + '.....' + fullTime + '.....' + this.state.lastLat + ', ' + this.state.lastLng);
+    // }
+  }
+
   _press(event) {
     // this.refs.roomID.blur();
-    this.setState({status: 'connect', info: 'Connecting'});
-    console.log("Pressed status:" + this.state.status + " Info: " + this.state.info)
-    // socket.send({
-    //   type: "call_user",
-    //   name: this.state.username,
-    //   callername: this.state.call
-    // })
-    join(this.state.call);
-    InCallManager.start({media: 'video', ringback: '_BUNDLE_'});
-    // InCallManager.startRingtone('_BUNDLE_');
-    // InCallManager.start({media: 'audio'});
+    if (this.state.loginStatus == 'Success') {
+      this.setState({status: 'connect', info: 'Connecting'});
+      console.log("Pressed status:" + this.state.status + " Info: " + this.state.info)
+      // socket.send({
+      //   type: "call_user",
+      //   name: this.state.username,
+      //   callername: this.state.call
+      // })
+    
+      this.sendLog();
+
+      join(this.state.call);
+      InCallManager.start({media: 'video', ringback: '_BUNDLE_'});
+    }else{
+      this.setState({ info: "Please Login" })
+    }
   }
   _switchVideoType() {
     const isFront = !this.state.isFront;
@@ -474,6 +562,8 @@ export default class Test2 extends React.Component {
                     <Text>Enter room</Text>
                   </TouchableOpacity>
                   </View>
+                  <Text>Latitude: {this.state.lastLat}</Text>
+        <Text>Longitude: {this.state.lastLng}</Text>
                 </View>
             </View> 
           ) : null
@@ -500,7 +590,7 @@ export default class Test2 extends React.Component {
               style={styles.optionsContainer}>
               <TouchableOpacity
                 style={styles.optionButton}
-                // onPress={this._onEndButtonPress}
+                // onPress={() => leave(this.state.mysocketid)}
                 >
                 <Image 
                   style={{width: 65, height: 65, opacity: 1}}
